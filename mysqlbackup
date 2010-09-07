@@ -6,7 +6,7 @@
 #                                                                              #
 # Author       : Ton Kersten                                   The Netherlands #
 #                                                                              #
-# Date         : 04-07-2008                                       Time : 14:11 #
+# Date         : 04-07-2010                                       Time : 14:11 #
 #                                                                              #
 # Description  : Create a backup tree of MySQL                                 #
 #                                                                              #
@@ -47,10 +47,10 @@
 #------------------------------------------------------------------------------#
 #                    V e r s i o n   i n f o r m a t i o n                     #
 #------------------------------------------------------------------------------#
-# $Id:: mysqlbackup 44 2010-09-07 06:37:57Z tonk                            $: #
-# $Revision:: 44                                                            $: #
+# $Id:: mysqlbackup 45 2010-09-07 06:45:40Z tonk                            $: #
+# $Revision:: 45                                                            $: #
 # $Author:: Ton Kersten <GitHub@TonKersten.com>                             $: #
-# $Date:: 2010-09-07 08:44:50 +0200 (Tue, 07 Sep 2010)                      $: #
+# $Date:: 2010-09-07 08:45:40 +0200 (Tue, 07 Sep 2010)                      $: #
 # $Hash::                                                                   $: #
 #------------------------------------------------------------------------------#
 #             E n d   o f   v e r s i o n   i n f o r m a t i o n              #
