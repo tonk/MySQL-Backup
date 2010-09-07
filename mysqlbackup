@@ -1,0 +1,792 @@
+#!/bin/bash
+#------------------------------------------------------------------------------#
+# vi: set sw=4 ts=4 ai:                            ("set modeline" in ~/.exrc) #
+#------------------------------------------------------------------------------#
+# Program      : mysqlbackup                                                   #
+#                                                                              #
+# Author       : Ton Kersten                                   The Netherlands #
+#                                                                              #
+# Date         : 04-07-2008                                       Time : 14:11 #
+#                                                                              #
+# Description  : Create a backup tree of MySQL                                 #
+#                                                                              #
+# Based on     : http://sourceforge.net/projects/automysqlbackup/              #
+#                Copyright (c) 2002-2003 wipe_out@lycos.co.uk                  #
+#                                                                              #
+# Parameters   : The name of the config file to use (Optional)                 #
+#                                                                              #
+# Pre reqs     : MySQL and MySQL dump                                          #
+#                                                                              #
+# Exit codes   :    0 -> OK                                                    #
+#                <> 0 -> !OK                                                   #
+#------------------------------------------------------------------------------#
+
+#------------------------------------------------------------------------------#
+#              (c) Copyright 2010 by Ton Kersten, The Netherlands              #
+#------------------------------------------------------------------------------#
+# This program is free software; you can redistribute it and/or modify it      #
+# under the terms of the GNU General Public License as published by the        #
+# Free Software Foundation; either version 2 of the License, or (at your       #
+# option) any later version.                                                   #
+#                                                                              #
+# This program is distributed in the hope that it will be useful, but          #
+# WITHOUT ANY WARRANTY; without even the implied warranty of                   #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                         #
+#                                                                              #
+# You should have received a copy of the GNU General Public License            #
+# along with this program; if not, write to the                                #
+# Free Software Foundation, Inc.,                                              #
+#     59 Temple Place - Suite 330,                                             #
+#     Boston,  MA 02111-1307,                                                  #
+#     USA                                                                      #
+#                                                                              #
+# See the GNU General Public License for more details.                         #
+# URL: http://www.gnu.org/copyleft/gpl.html.                                   #
+#------------------------------------------------------------------------------#
+
+#------------------------------------------------------------------------------#
+#                    V e r s i o n   i n f o r m a t i o n                     #
+#------------------------------------------------------------------------------#
+# $Id:: mysqlbackup 43 2010-09-07 06:37:39Z tonk                            $: #
+# $Revision:: 43                                                            $: #
+# $Author:: Ton Kersten <TonK@TonKersten.com>                               $: #
+# $Date:: 2010-09-07 08:37:40 +0200 (Tue, 07 Sep 2010)                      $: #
+# $Hash::                                                                   $: #
+#------------------------------------------------------------------------------#
+#             E n d   o f   v e r s i o n   i n f o r m a t i o n              #
+#------------------------------------------------------------------------------#
+
+#------------------------------------------------------------------------------#
+# Determine the program name and the 'running directory'                       #
+#------------------------------------------------------------------------------#
+IAM="${0##*/}"
+CRD="$( [[ "$(printf "${0}" | cut -c 1 )" = "." ]] &&
+{	printf "${PWD}/${0}"
+} || {
+	printf "${0}"
+})"
+CRD="${CRD%/*}"
+CUR="${PWD}"
+
+#------------------------------------------------------------------------------#
+# Save the shell settings                                                      #
+#------------------------------------------------------------------------------#
+SETA=0; [[ ${-} = *a* ]] && SETA=1
+SETE=0; [[ ${-} = *e* ]] && SETE=1
+SETU=0; [[ ${-} = *u* ]] && SETU=1
+SETX=0; [[ ${-} = *x* ]] && SETX=1
+
+#------------------------------------------------------------------------------#
+# Set and unset the needed shell settings                                      #
+#------------------------------------------------------------------------------#
+set +o noclobber			# Overwrite existing files, if needed              #
+set -o nounset				# Don't allow uninitialized variables              #
+set +o errexit				# No returncode checking                           #
+
+#------------------------------------------------------------------------------#
+# Define constants                                                             #
+#------------------------------------------------------------------------------#
+VER="1.$(awk '/^# \$Revision::/ { print $3 }' ${0})"
+CONFIGFILE="${CRD}/${IAM}.conf"
+PATH="${PATH}:/bin:/sbin"
+PATH="${PATH}:/usr/bin:/usr/sbin"
+PATH="${PATH}:/usr/local/bin:/usr/local/sbin"
+PATH="${PATH}:/usr/local/mysql/bin"
+DATE=$( date '+%Y-%m-%d_%H%M%S')	# Datestamp e.g 2008-06-05_142354          #
+DOW=$(  date '+%A')					# Day of the week e.g. Monday              #
+DNOW=$( date '+%u')					# Day number of the week e.g. 1 to 7       #
+DOM=$(  date '+%d')					# Date of the Month e.g. 27                #
+M=$(    date '+%B')					# Name of the Month e.g January            #
+W=$(    date '+%V')					# Week Number e.g 37                       #
+WN="$(echo "${W}" | sed 's/^0//')"	# Week Nymber without leading 0            #
+WD="80"								# Screen width                             #
+SIN="$(printf "%${WD}s" "")"; SIN="${SIN// /-}"		# Single dash line         #
+DBL="$(printf "%${WD}s" "")"; DBL="${DBL// /=}"		# Double dash line         #
+
+#------------------------------------------------------------------------------#
+# Check the parameters                                                         #
+#------------------------------------------------------------------------------#
+[[ "${1:-}" = "-V" ]] &&
+{	echo "This is '${IAM}' version ${VER}"
+	exit 0
+}
+
+[[ "${1:-}" = "-h" ]] &&
+{	cat <<- @EOF
+		${IAM} version ${VER}
+		Syntax: ${IAM} [ -h|-v|<configfile>]
+		    -h           Display this help and exit
+		    -V           Display the version number and exit
+		    configfile   Use this file as the configuration file
+		                 instead of the default.
+		                 Default: ${CONFIGFILE}
+	@EOF
+	exit 0
+}
+
+#------------------------------------------------------------------------------#
+# Read the configuration                                                       #
+#------------------------------------------------------------------------------#
+CONFIGFILE="${1:-${CRD}/${IAM}.conf}"
+if [[ -r "${CONFIGFILE}" ]]
+then
+	. "${CONFIGFILE}"
+else
+	echo "Could not find config '${CONFIGFILE}'!"
+	exit 1
+fi
+
+#------------------------------------------------------------------------------#
+# We need the BACKUPDIR setting                                                #
+#------------------------------------------------------------------------------#
+if [[ x"${BACKUPDIR:-}" = x"" ]]
+then
+	echo "Config setting 'BACKUPDIR' not found!'"
+	exit 1
+fi
+
+#------------------------------------------------------------------------------#
+# Set the constants from the configfile                                        #
+#------------------------------------------------------------------------------#
+LOGFILE="${BACKUPDIR}/${DBHOST}-${DATE}.log"		# Logfile Name             #
+LOGERR="${BACKUPDIR}/ERRORS_${DBHOST}-${DATE}.log"	# Error logfile Name       #
+BACKUPFILES=""
+OPT="--opt"											# MySQL dump options       #
+OPT="${OPT} --quote-names"
+# Extra options: --no-create-info                                              #
+
+#------------------------------------------------------------------------------#
+# Who owns the backup                                                          #
+#------------------------------------------------------------------------------#
+OWNER="${OWNER:-root}"
+GROUP="${GROUP:-root}"
+
+#------------------------------------------------------------------------------#
+# Add compression if this is requested                                         #
+#------------------------------------------------------------------------------#
+COMMCOMP="${COMMCOMP:-no}"
+if [[ "${COMMCOMP}" = "yes" ]]
+then
+	OPT="${OPT} --compress"
+fi
+
+#------------------------------------------------------------------------------#
+# Add a maximum speed if this is requested                                     #
+#------------------------------------------------------------------------------#
+MAX_ALLOWED_PACKET="${MAX_ALLOWED_PACKET:-}"
+if [[ x"${MAX_ALLOWED_PACKET}" != x"" ]]
+then
+	OPT="${OPT} --max_allowed_packet=${MAX_ALLOWED_PACKET}"
+fi
+
+#------------------------------------------------------------------------------#
+# Add drop database option if this is requested                                #
+#------------------------------------------------------------------------------#
+DROP_DATABASE="${DROP_DATABASE:-no}"
+if [[ "${DROP_DATABASE}" = "yes" ]]
+then
+	OPT="${OPT} --add-drop-database"
+fi
+
+#------------------------------------------------------------------------------#
+# Add drop table option if this is requested                                   #
+#------------------------------------------------------------------------------#
+DROP_TABLE="${DROP_TABLE:-no}"
+if [[ "${DROP_TABLE}" = "yes" ]]
+then
+	OPT="${OPT} --add-drop-table"
+fi
+
+#------------------------------------------------------------------------------#
+# Create required directories                                                  #
+#------------------------------------------------------------------------------#
+[[ ! -e ${BACKUPDIR}         ]] && mkdir -p ${BACKUPDIR}
+[[ ! -e ${BACKUPDIR}/daily   ]] && mkdir -p ${BACKUPDIR}/daily
+[[ ! -e ${BACKUPDIR}/weekly  ]] && mkdir -p ${BACKUPDIR}/weekly
+[[ ! -e ${BACKUPDIR}/monthly ]] && mkdir -p ${BACKUPDIR}/monthly
+
+#------------------------------------------------------------------------------#
+# Latest backups requested (Default = yes)                                     #
+#------------------------------------------------------------------------------#
+LATEST="${LATEST:-yes}"
+if [[ "${LATEST}" = "yes" ]]
+then
+	[[ ! -e ${BACKUPDIR}/latest ]] && mkdir -p ${BACKUPDIR}/latest
+
+	#--------------------------------------------------------------------------#
+	# Remove all files in latest, older than 24 hours                          #
+	#--------------------------------------------------------------------------#
+	find ${BACKUPDIR}/latest -type f -mtime +0 -name \*.sql.gz -exec rm {} \;
+else
+	LATEST="no"
+fi
+
+#------------------------------------------------------------------------------#
+# IO redirection for logging.                                                  #
+#------------------------------------------------------------------------------#
+touch ${LOGFILE}
+exec 6>&1					# Link file descriptor #6 with stdout.             #
+							# Saves stdout.                                    #
+exec > ${LOGFILE}			# stdout replaced with file ${LOGFILE}.            #
+touch ${LOGERR}
+exec 7>&2					# Link file descriptor #7 with stderr.             #
+							# Saves stderr.                                    #
+exec 2> ${LOGERR}			# stderr replaced with file ${LOGERR}.             #
+SUFFIX=""
+
+Center()
+{
+	typeset LINE
+
+	#--------------------------------------------------------------------------#
+	# Cut the line to the maximum line length                                  #
+	#--------------------------------------------------------------------------#
+	LINE=$(printf -- "${*:-}" | cut -c 1-$(( ${WD} - 4 )) )
+	LEN=$(( ( ${WD:-80} - ${#LINE} ) / 2 ))
+	CHAR="$(printf "%${LEN}s" " ")"
+	printf -- "${CHAR}${LINE}"
+	return
+}
+
+#------------------------------------------------------------------------------#
+# Function for giving a nice datestring                                        #
+#------------------------------------------------------------------------------#
+now()
+{
+	date '+%Y-%m-%d %H:%M:%S'
+}
+
+#------------------------------------------------------------------------------#
+# Function for checking the database                                           #
+#------------------------------------------------------------------------------#
+dbcheck ()
+{
+
+	CHKOPT=""
+	[[ "${CHECK_REPAIR:-no}"   = "yes" ]] && CHKOPT="${CHKOPT} --auto-repair"
+	[[ "${CHECK_OPTIMIZE:-no}" = "yes" ]] && CHKOPT="${CHKOPT} --optimize"
+	[[ "${CHECK_UPGRADE:-no}"  = "yes" ]] && CHKOPT="${CHKOPT} --check-upgrade"
+
+	mysqlcheck							\
+		--user=${USERNAME}				\
+		--password=${PASSWORD}			\
+		--host=${DBHOST}				\
+		--check							\
+		--all-databases					\
+		${CHKOPT}
+
+	return
+}
+
+#------------------------------------------------------------------------------#
+# Function for dumping the database                                            #
+#------------------------------------------------------------------------------#
+dbdump ()
+{
+
+	{
+		printf '[client]\npassword=%s\n' "${PASSWORD}"	|
+			3<&0 <&4 4<&- mysqldump						\
+					--defaults-file=/dev/fd/3			\
+					--user=${USERNAME}					\
+					--host=${DBHOST}					\
+					${OPT}								\
+					${1} > ${2}
+	} 4<&0
+
+	return
+}
+
+#------------------------------------------------------------------------------#
+# Compression function and copy of the latest                                  #
+#------------------------------------------------------------------------------#
+compression ()
+{
+	ZIPDIRE="$(dirname  ${1})"
+	ZIPFILE="$(basename ${1})"
+	CURDIR="${PWD}"
+	cd ${ZIPDIRE}
+
+	case ${COMP:-}
+	in
+		gzip)
+			echo "Compression information for ${ZIPFILE}.zip"
+			gzip -f "${1}"
+			gzip -l "${ZIPFILE}.gz" | sed 's/^      //'
+			SUFFIX=".gz"
+			;;
+
+		bzip2)
+			echo "Compression information for ${ZIPFILE}.bz2"
+			echo "In directory ${ZIPDIRE}"
+			bzip2 -f -v ${ZIPFILE} 2>&1
+			SUFFIX=".bz2"
+			;;
+
+		*)
+			echo "No compression option set, check advanced settings"
+			;;
+	esac
+
+	if [[ "${LATEST}" = "yes" ]]
+	then
+		cp -p ${ZIPFILE}${SUFFIX} ${BACKUPDIR}/latest/
+	fi
+	cd ${CURDIR}
+
+	return
+}
+
+
+#------------------------------------------------------------------------------#
+# Run a command before we begin                                                #
+#------------------------------------------------------------------------------#
+if [[ x"${PREBACKUP:-}" != x"" ]]
+then
+	echo "${DBL}"
+	echo "Prebackup command output."
+	echo
+	eval ${PREBACKUP}
+	echo
+	echo "${DBL}"
+	echo
+fi
+
+#------------------------------------------------------------------------------#
+# Create a OPT string for the given options                                    #
+#------------------------------------------------------------------------------#
+SEPDIR="${SEPDIR:-yes}"
+CREATE_DATABASE="${CREATE_DATABASE:-yes}"
+if [[ "${SEPDIR}" = "yes" ]]
+then
+	#--------------------------------------------------------------------------#
+	# Check if CREATE DATABSE should be included in the dump                   #
+	#--------------------------------------------------------------------------#
+	if [[ "${CREATE_DATABASE}" = "no" ]]
+	then
+		OPT="${OPT} --no-create-db"
+	else
+		OPT="${OPT} --databases"
+	fi
+else
+	OPT="${OPT} --databases"
+fi
+[[ "${LOCK_TABLES:-yes}" = "no" ]] && OPT="${OPT} --skip-lock-tables"
+
+#------------------------------------------------------------------------------#
+# Hostname for LOG information                                                 #
+#------------------------------------------------------------------------------#
+DBHOST="${DBHOST:-localhost}"
+SOCKET="${SOCKET:-}"
+if [[ "${DBHOST}" = "localhost" ]]
+then
+	HOST=$(hostname)
+	if [[ x"${SOCKET}" != x"" ]]
+	then
+		OPT="${OPT} --socket=${SOCKET}"
+	fi
+else
+	HOST=${DBHOST}
+fi
+HD="${HOST} - $(now)"
+
+#------------------------------------------------------------------------------#
+# Backup all databases?                                                        #
+#------------------------------------------------------------------------------#
+DBNAMES="${DBNAMES:-all}"
+if [[ "${DBNAMES}" = "all" ]]
+then
+	#--------------------------------------------------------------------------#
+	# Get all databases                                                        #
+	#--------------------------------------------------------------------------#
+	DBNAMES="$( {												\
+				printf '[client]\npassword=%s\n' "${PASSWORD}"	|
+					3<&0 <&4 4<&- mysql							\
+					--defaults-file=/dev/fd/3					\
+					--user=${USERNAME}							\
+					--host=${DBHOST}							\
+					--batch										\
+					--skip-column-names							\
+					-e "show databases" 						| \
+					grep -v 'lost+found'						| \
+					sed 's/ /%/g'								| \
+					sort
+			} 4<&0 )"
+
+	#--------------------------------------------------------------------------#
+	# Strip the DBs that are excluded                                          #
+	#--------------------------------------------------------------------------#
+	for exclude in ${DBEXCLUDE:-}
+	do
+		DBNAMES=$(echo ${DBNAMES} | sed "s/\b${exclude}\b//g")
+	done
+
+	MDBNAMES=${DBNAMES}
+fi
+
+#------------------------------------------------------------------------------#
+# Set the defaults for the MySQL check                                         #
+#------------------------------------------------------------------------------#
+RUN_CHECK="${RUN_CHECK:-yes}"
+CHECK_OPTIMIZE="${CHECK_OPTIMIZE:-yes}"
+CHECK_REPAIR="${CHECK_REPAIR:-no}"
+
+#------------------------------------------------------------------------------#
+# Here we go!                                                                  #
+#------------------------------------------------------------------------------#
+case ${DOWEEKLY}
+in
+	1)	DOWEEKLYDAY="Monday"		;;
+	2)	DOWEEKLYDAY="Tuesday"		;;
+	3)	DOWEEKLYDAY="Wednesday"		;;
+	4)	DOWEEKLYDAY="Thursday"		;;
+	5)	DOWEEKLYDAY="Friday"		;;
+	6)	DOWEEKLYDAY="Saturday"		;;
+	7)	DOWEEKLYDAY="Sunday"		;;
+esac
+echo "${DBL}"
+echo
+Center "MySQLBackup version ${VER}"
+echo
+echo
+echo "${DBL}"
+echo "Backup of database server         : ${HOST}"
+echo "Backup settings"
+echo "    Start time and date           : $(now)"
+echo "    Backup directory              : ${BACKUPDIR}"
+echo "    Use seperate directories      : ${SEPDIR}"
+echo "    Exclude databases             : ${DBEXCLUDE:-none}"
+echo "    Weekly backup on day          : ${DOWEEKLYDAY}"
+echo "    Backup owner and group        : ${OWNER} - ${GROUP}"
+echo "    Compression                   : ${COMP}"
+echo "    Communication compression     : ${COMMCOMP}"
+echo "    Create latest backup          : ${LATEST}"
+echo "    Lock database during backup   : ${LOCK_TABLES}"
+echo "    Add 'create database' command : ${CREATE_DATABASE}"
+echo "    Add 'drop database' command   : ${DROP_DATABASE}"
+echo "    Add 'drop table' command      : ${DROP_TABLE}"
+echo "    Run MySQL check command       : ${RUN_CHECK}"
+[[ "${RUN_CHECK}" = "yes" ]] &&
+{
+	echo "        Optimize                  : ${CHECK_OPTIMIZE}"
+	echo "        Upgrade                   : ${CHECK_OPTIMIZE}"
+	echo "        Repair                    : ${CHECK_REPAIR}"
+}
+
+set ${DBNAMES}
+echo "    Backup databases              : ${1}"
+shift
+for db in ${*}
+do
+	echo "                                    ${db}"
+done
+echo
+echo "${DBL}"
+echo "Backup start time -> $(now)"
+echo "${DBL}"
+
+#------------------------------------------------------------------------------#
+# Run MySQL check when requested                                               #
+#------------------------------------------------------------------------------#
+[[ "${RUN_CHECK}" = "yes" ]] &&
+{
+	echo
+	echo "${SIN}"
+	echo "Running database check"
+	echo "${SIN}"
+	dbcheck
+	echo "${SIN}"
+}
+
+#------------------------------------------------------------------------------#
+# Test if seperate DB backups are required                                     #
+#------------------------------------------------------------------------------#
+if [[ "${SEPDIR}" = "yes" ]]
+then
+	#--------------------------------------------------------------------------#
+	# Monthly full backup of all databases                                     #
+	#--------------------------------------------------------------------------#
+	if [[ ${DOM} = "01" ]]
+	then
+		for MDB in ${MDBNAMES}
+		do
+			#------------------------------------------------------------------#
+			# Prepare ${DB} for backup                                         #
+			#------------------------------------------------------------------#
+			MDB="$(echo ${MDB} | sed 's/%/ /g')"
+			DIR="${BACKUPDIR}/monthly/${MDB}"
+
+			[[ ! -e "${DIR}" ]] && mkdir -p ${DIR}
+
+			echo "Monthly backup of ${MDB}..."
+			NAME="${DIR}/${MDB}_${DATE}.${M}.${MDB}.sql"
+			dbdump "${MDB}" "${NAME}"
+			compression "${NAME}"
+			BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+			echo "${SIN}"
+		done
+	fi
+
+	for DB in ${DBNAMES}
+	do
+		#----------------------------------------------------------------------#
+		# Prepare ${DB}                                                        #
+		#----------------------------------------------------------------------#
+		DB="$(echo ${DB} | sed 's/%/ /g')"
+		DAY="${BACKUPDIR}/daily/${DB}"
+		WKL="${BACKUPDIR}/weekly/${DB}"
+
+		#----------------------------------------------------------------------#
+		# Create Seperate directory for each DB                                #
+		#----------------------------------------------------------------------#
+		[[ ! -e "${DAY}" ]]	&& mkdir -p ${DAY}
+		[[ ! -e "${WKL}" ]]	&& mkdir -p ${WKL}
+
+		#----------------------------------------------------------------------#
+		# Weekly Backup                                                        #
+		#----------------------------------------------------------------------#
+		if [[ ${DNOW} = ${DOWEEKLY} ]]
+		 then
+			echo "Weekly backup of database '${DB}'"
+			echo "Rotating 5 weeks backups..."
+
+			if [[ "${WN}" -le 05 ]]
+			then
+				REMW=$(( 48 + ${WN} ))
+			elif [[ "${WN}" -lt 15 ]]
+			then
+				REMW=0$(( ${WN} - 5 ))
+			else
+				REMW=$(( ${WN} - 5 ))
+			fi
+			for rem in ${WKL}/${DB}_week.${REMW}.*
+			do
+				echo "  Removing -> $(basename ${rem})"
+			done
+			rm -f ${WKL}/${DB}_week.${REMW}.*
+			echo
+
+			NAME="${WKL}/${DB}_week.${W}.${DATE}.sql"
+			dbdump "${DB}" "${NAME}"
+			compression "${NAME}"
+			BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+			echo "${SIN}"
+		else
+			echo "Daily backup of database '${DB}'"
+			echo "Rotating last weeks backup..."
+			find ${DAY} -type f -mtime +0 -name \*.${DOW}.sql.gz	| \
+				sort												| \
+				while read rem
+				do
+					echo "  Removing -> $(basename ${rem})"
+					rm -f ${rem}
+				done
+			echo
+			NAME="${BACKUPDIR}/daily/${DB}/${DB}_${DATE}.${DOW}.sql"
+			dbdump "${DB}" "${NAME}"
+			compression "${NAME}"
+			BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+			echo "${SIN}"
+		fi
+	done
+else
+	#--------------------------------------------------------------------------#
+	# Monthly full backup of all databases                                     #
+	#--------------------------------------------------------------------------#
+	if [[ ${DOM} = "01" ]]
+	then
+		echo "Monthly full backup of (${MDBNAMES})..."
+		NAME="${BACKUPDIR}/monthly/${DATE}.${M}.all-databases.sql"
+		dbdump "${MDBNAMES}" "${NAME}"
+		compression "${NAME}"
+		BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+		echo "${SIN}"
+	fi
+
+	#--------------------------------------------------------------------------#
+	# Weekly backup                                                            #
+	#--------------------------------------------------------------------------#
+	if [[ ${DNOW} = ${DOWEEKLY} ]]
+	then
+		echo "Weekly backup of databases '${DBNAMES}'"
+		echo
+		echo "Rotating 5 weeks backups..."
+		if [[ "${WN}" -le 05 ]]
+		then
+			REMW=$(( 48 + ${WN} ))
+		elif [[ "${WN}" -lt 15 ]]
+		then
+			REMW=0$(( ${WN} - 5 ))
+		else
+			REMW=$(( ${WN} - 5 ))
+		fi
+		find ${BACKUPDIR}/weekly -type f -mtime +0 -name week.${REMW}\*.sql.gz	| \
+			sort																| \
+			while read rem
+			do
+				echo "  Removing -> $(basename ${rem})"
+				rm -f ${rem}
+			done
+		echo
+
+		NAME="${BACKUPDIR}/weekly/week.${W}.${DATE}.sql"
+		dbdump "${DBNAMES}" "${NAME}"
+		compression "${NAME}"
+		BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+		echo "${SIN}"
+	else
+		echo "Daily backup of databases '${DBNAMES}'"
+		echo
+		echo "Rotating last weeks backup..."
+		find ${BACKUPDIR}/daily -type f -mtime +0 -name \*.${DOW}\*.sql.gz	| \
+			sort															| \
+			while read rem
+			do
+				echo "  Removing -> $(basename ${rem})"
+				rm -f ${rem}
+			done
+		echo
+		echo
+
+		NAME="${BACKUPDIR}/daily/${DATE}.${DOW}.sql"
+		dbdump "${DBNAMES}" "${NAME}"
+		compression "${NAME}"
+		BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+		echo "${SIN}"
+	fi
+fi
+echo
+echo "${DBL}"
+echo "Backup end at $(now)"
+echo "${DBL}"
+
+#------------------------------------------------------------------------------#
+# Show statistics                                                              #
+#------------------------------------------------------------------------------#
+echo "Total disk space used for backup storage...."
+echo "Size - Location $(du -hs "${BACKUPDIR}")"
+
+#------------------------------------------------------------------------------#
+# Run command when we're done                                                  #
+#------------------------------------------------------------------------------#
+if [[ x"${POSTBACKUP:-}" != x"" ]]
+then
+	echo "${DBL}"
+	echo "Postbackup command output."
+	echo
+	eval ${POSTBACKUP}
+	echo
+	echo "${DBL}"
+fi
+
+#------------------------------------------------------------------------------#
+# Backup is done!                                                              #
+#------------------------------------------------------------------------------#
+if [[ -s "${LOGERR}" ]]
+then
+	MESG="MySQLBackup ready with errors at $(now)"
+else
+	MESG="MySQLBackup version ${VER} done at $(now)"
+fi
+echo "${DBL}"
+echo
+Center "${MESG}"
+echo
+echo
+echo "${DBL}"
+
+#------------------------------------------------------------------------------#
+# Clean up IO redirection                                                      #
+#------------------------------------------------------------------------------#
+exec 1>&6 6>&-
+exec 1>&7 7>&-
+
+#------------------------------------------------------------------------------#
+# Set the directory and file rights if allowed                                 #
+#------------------------------------------------------------------------------#
+[[ $(id -u) = 0 ]] &&
+{	chown -R ${OWNER}:${GROUP} ${BACKUPDIR}
+	chmod 700 ${BACKUPDIR}/*
+	find ${BACKUPDIR} -type d -print0 | xargs -0 chmod 700
+	find ${BACKUPDIR} -type f -print0 | xargs -0 chmod 600
+}
+
+#------------------------------------------------------------------------------#
+# Mail the results if requested                                                #
+#------------------------------------------------------------------------------#
+case "${MAILCONTENT:-}"
+in
+	files)
+		if [[ -s "${LOGERR}" ]]
+		then
+			#------------------------------------------------------------------#
+			# Include error log if is larger than zero.                        #
+			#------------------------------------------------------------------#
+			BACKUPFILES="${BACKUPFILES} ${LOGERR}"
+			ERRORNOTE="WARNING: Error reported - "
+		fi
+
+		#----------------------------------------------------------------------#
+		# Get backup size                                                      #
+		#----------------------------------------------------------------------#
+		ATTSIZE=$(du -c ${BACKUPFILES} | grep "[[:digit:][:space:]]total$" | sed 's/\s*total//')
+		if [[ ${MAXATTSIZE} -ge ${ATTSIZE} ]]
+		then
+			BACKUPFILES=$(echo "${BACKUPFILES}" | sed -e "s# # -a #g")
+			mutt -s "${ERRORNOTE} MySQL backup log and SQL files for ${HD}" ${BACKUPFILES} ${MAILADDR} < ${LOGFILE}
+		else
+			cat "${LOGFILE}" | mail -s "WARNING! - MySQL backup exceeds set maximum attachment size on ${HD}" ${MAILADDR}
+		fi
+		;;
+
+	log)
+		cat "${LOGFILE}" | mail -s "MySQL backup log for ${HD}" ${MAILADDR}
+		if [[ -s "${LOGERR}" ]]
+		then
+			cat "${LOGERR}" | mail -s "ERRORS REPORTED: MySQL backup error log for ${HD}" ${MAILADDR}
+		fi
+		;;
+
+	quiet)
+		if [[ -s "${LOGERR}" ]]
+		then
+			cat "${LOGERR}"  | mail -s "ERRORS REPORTED: MySQL backup error log for ${HD}" ${MAILADDR}
+			cat "${LOGFILE}" | mail -s "MySQL Backup Log for ${HD}" ${MAILADDR}
+		fi
+		;;
+
+	*)
+		if [[ -s "${LOGERR}" ]]
+		then
+			cat "${LOGFILE}"
+			echo
+			echo "###### WARNING ######"
+			echo "Errors reported during MySQL backup execution. Backup failed"
+			echo "Error log below"
+			cat "${LOGERR}"
+		else
+			cat "${LOGFILE}"
+		fi
+		;;
+esac
+
+#------------------------------------------------------------------------------#
+# Check the error log                                                          #
+#------------------------------------------------------------------------------#
+if [[ -s "${LOGERR}" ]]
+then
+	STATUS=1
+else
+	STATUS=0
+
+	#--------------------------------------------------------------------------#
+	# Clean up the logfiles if no error occurred                               #
+	#--------------------------------------------------------------------------#
+	rm -f ${LOGFILE}
+	rm -f ${LOGERR}
+fi
+
+#------------------------------------------------------------------------------#
+# That's all, folks!                                                           #
+#------------------------------------------------------------------------------#
+exit ${STATUS}
