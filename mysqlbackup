@@ -47,10 +47,10 @@
 #------------------------------------------------------------------------------#
 #                    V e r s i o n   i n f o r m a t i o n                     #
 #------------------------------------------------------------------------------#
-# $Id:: mysqlbackup 45 2010-09-07 06:45:40Z tonk                            $: #
-# $Revision:: 45                                                            $: #
-# $Author:: Ton Kersten <GitHub@TonKersten.com>                             $: #
-# $Date:: 2010-09-07 08:45:40 +0200 (Tue, 07 Sep 2010)                      $: #
+# $Id:: mysqlbackup 46 2010-10-14 11:40:16 tonk                             $: #
+# $Revision:: 46                                                            $: #
+# $Author:: Ton Kersten <tonk@tonkersten.com>                               $: #
+# $Date:: 2010-10-14 11:40:16 +0200 (Thu, 14 Oct 2010)                      $: #
 # $Hash::                                                                   $: #
 #------------------------------------------------------------------------------#
 #             E n d   o f   v e r s i o n   i n f o r m a t i o n              #
@@ -476,7 +476,7 @@ echo "    Run MySQL check command       : ${RUN_CHECK}"
 set ${DBNAMES}
 echo "    Backup databases              : ${1}"
 shift
-for db in ${*}
+for db in ${*:-}
 do
 	echo "                                    ${db}"
 done
