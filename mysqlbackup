@@ -48,7 +48,7 @@
 #                    V e r s i o n   i n f o r m a t i o n                     #
 #------------------------------------------------------------------------------#
 # $Id:: mysqlbackup 46 2010-10-14 11:40:16 tonk                             $: #
-# $Revision:: 46                                                            $: #
+# $Revision:: 47                                                            $: #
 # $Author:: Ton Kersten <tonk@tonkersten.com>                               $: #
 # $Date:: 2010-10-14 11:40:16 +0200 (Thu, 14 Oct 2010)                      $: #
 # $Hash::                                                                   $: #
@@ -130,9 +130,12 @@ DBL="$(printf "%${WD}s" "")"; DBL="${DBL// /=}"		# Double dash line         #
 CONFIGFILE="${1:-${CRD}/${IAM}.conf}"
 if [[ -r "${CONFIGFILE}" ]]
 then
-	. "${CONFIGFILE}"
+	. "${CONFIGFILE}" || {
+		echo "Error processing config '${CONFIGFILE}'!" >&2
+		exit 1
+	}
 else
-	echo "Could not find config '${CONFIGFILE}'!"
+	echo "Could not find config '${CONFIGFILE}'!" >&2
 	exit 1
 fi
 
@@ -196,6 +199,11 @@ if [[ "${DROP_TABLE}" = "yes" ]]
 then
 	OPT="${OPT} --add-drop-table"
 fi
+
+#------------------------------------------------------------------------------#
+# Make monthly backups (default = yes)                                         #
+#------------------------------------------------------------------------------#
+DOMONTHLY="${DOMONTHLY:-yes}"
 
 #------------------------------------------------------------------------------#
 # Create required directories                                                  #
@@ -421,8 +429,9 @@ then
 		DBNAMES=$(echo ${DBNAMES} | sed "s/\b${exclude}\b//g")
 	done
 
-	MDBNAMES=${DBNAMES}
+	MONTHLY_DBNAMES=${DBNAMES}
 fi
+MONTHLY_DBNAMES=${MONTHLY_DBNAMES:-}
 
 #------------------------------------------------------------------------------#
 # Set the defaults for the MySQL check                                         #
@@ -506,25 +515,28 @@ then
 	#--------------------------------------------------------------------------#
 	# Monthly full backup of all databases                                     #
 	#--------------------------------------------------------------------------#
-	if [[ ${DOM} = "01" ]]
+	if [[ x"${DOMONTHLY}" = x"yes" ]]
 	then
-		for MDB in ${MDBNAMES}
-		do
-			#------------------------------------------------------------------#
-			# Prepare ${DB} for backup                                         #
-			#------------------------------------------------------------------#
-			MDB="$(echo ${MDB} | sed 's/%/ /g')"
-			DIR="${BACKUPDIR}/monthly/${MDB}"
+		if [[ ${DOM} = "01" ]]
+		then
+			for MDB in ${MONTHLY_DBNAMES}
+			do
+				#--------------------------------------------------------------#
+				# Prepare ${DB} for backup                                     #
+				#--------------------------------------------------------------#
+				MDB="$(echo ${MDB} | sed 's/%/ /g')"
+				DIR="${BACKUPDIR}/monthly/${MDB}"
 
-			[[ ! -e "${DIR}" ]] && mkdir -p ${DIR}
+				[[ ! -e "${DIR}" ]] && mkdir -p ${DIR}
 
-			echo "Monthly backup of ${MDB}..."
-			NAME="${DIR}/${MDB}_${DATE}.${M}.${MDB}.sql"
-			dbdump "${MDB}" "${NAME}"
-			compression "${NAME}"
-			BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
-			echo "${SIN}"
-		done
+				echo "Monthly backup of ${MDB}..."
+				NAME="${DIR}/${MDB}_${DATE}.${M}.${MDB}.sql"
+				dbdump "${MDB}" "${NAME}"
+				compression "${NAME}"
+				BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+				echo "${SIN}"
+			done
+		fi
 	fi
 
 	for DB in ${DBNAMES}
@@ -593,14 +605,17 @@ else
 	#--------------------------------------------------------------------------#
 	# Monthly full backup of all databases                                     #
 	#--------------------------------------------------------------------------#
-	if [[ ${DOM} = "01" ]]
+	if [[ x"${DOMONTHLY}" = x"yes" ]]
 	then
-		echo "Monthly full backup of (${MDBNAMES})..."
-		NAME="${BACKUPDIR}/monthly/${DATE}.${M}.all-databases.sql"
-		dbdump "${MDBNAMES}" "${NAME}"
-		compression "${NAME}"
-		BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
-		echo "${SIN}"
+		if [[ ${DOM} = "01" ]]
+		then
+			echo "Monthly full backup of (${MONTHLY_DBNAMES})..."
+			NAME="${BACKUPDIR}/monthly/${DATE}.${M}.all-databases.sql"
+			dbdump "${MONTHLY_DBNAMES}" "${NAME}"
+			compression "${NAME}"
+			BACKUPFILES="${BACKUPFILES} ${NAME}${SUFFIX}"
+			echo "${SIN}"
+		fi
 	fi
 
 	#--------------------------------------------------------------------------#
