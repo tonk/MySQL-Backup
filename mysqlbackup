@@ -47,10 +47,10 @@
 #------------------------------------------------------------------------------#
 #                    V e r s i o n   i n f o r m a t i o n                     #
 #------------------------------------------------------------------------------#
-# $Id:: mysqlbackup 46 2010-10-14 11:40:16 tonk                             $: #
-# $Revision:: 47                                                            $: #
+# $Id:: mysqlbackup 48 2010-12-02 14:00:00 tonk                             $: #
+# $Revision:: 48                                                            $: #
 # $Author:: Ton Kersten <tonk@tonkersten.com>                               $: #
-# $Date:: 2010-10-14 11:40:16 +0200 (Thu, 14 Oct 2010)                      $: #
+# $Date:: 2010-12-02 14:00:35 +0100 (Thu, 02 Dec 2010)                      $: #
 # $Hash::                                                                   $: #
 #------------------------------------------------------------------------------#
 #             E n d   o f   v e r s i o n   i n f o r m a t i o n              #
@@ -107,12 +107,12 @@ DBL="$(printf "%${WD}s" "")"; DBL="${DBL// /=}"		# Double dash line         #
 # Check the parameters                                                         #
 #------------------------------------------------------------------------------#
 [[ "${1:-}" = "-V" ]] &&
-{	echo "This is '${IAM}' version ${VER}"
+{	echo "This is '${IAM}' version ${VER}" >&2
 	exit 0
 }
 
 [[ "${1:-}" = "-h" ]] &&
-{	cat <<- @EOF
+{	cat <<- @EOF >&2
 		${IAM} version ${VER}
 		Syntax: ${IAM} [ -h|-v|<configfile>]
 		    -h           Display this help and exit
@@ -144,7 +144,7 @@ fi
 #------------------------------------------------------------------------------#
 if [[ x"${BACKUPDIR:-}" = x"" ]]
 then
-	echo "Config setting 'BACKUPDIR' not found!'"
+	echo "Config setting 'BACKUPDIR' not found!'" >&2
 	exit 1
 fi
 
@@ -302,7 +302,13 @@ dbdump ()
 					${1} > ${2}
 	} 4<&0
 
-	return
+	RC=${?}
+	if [[ ${RC} != 0 ]]
+	then
+		echo "dbdump gave errorcode ${RC} for database '${1}'" >&2
+	fi
+
+	return ${RC}
 }
 
 #------------------------------------------------------------------------------#
@@ -315,11 +321,13 @@ compression ()
 	CURDIR="${PWD}"
 	cd ${ZIPDIRE}
 
+	RC=0
 	case ${COMP:-}
 	in
 		gzip)
 			echo "Compression information for ${ZIPFILE}.zip"
 			gzip -f "${1}"
+			RC=${?}
 			gzip -l "${ZIPFILE}.gz" | sed 's/^      //'
 			SUFFIX=".gz"
 			;;
@@ -328,21 +336,29 @@ compression ()
 			echo "Compression information for ${ZIPFILE}.bz2"
 			echo "In directory ${ZIPDIRE}"
 			bzip2 -f -v ${ZIPFILE} 2>&1
+			RC=${?}
 			SUFFIX=".bz2"
 			;;
 
 		*)
-			echo "No compression option set, check advanced settings"
+			echo "No compression option set, check advanced settings" >&2
 			;;
 	esac
 
+	RC=${?}
+	if [[ ${RC} != 0 ]]
+	then
+		echo "compression gave errorcode ${RC} for file '${1}'" >&2
+	fi
+
 	if [[ "${LATEST}" = "yes" ]]
 	then
-		cp -p ${ZIPFILE}${SUFFIX} ${BACKUPDIR}/latest/
+		cp -p ${ZIPFILE}${SUFFIX} ${BACKUPDIR}/latest/ || 	\
+			echo "copy compressed file gave errorcode ${RC} for file '${ZIPFILE}'" >&2
 	fi
 	cd ${CURDIR}
 
-	return
+	return ${RC}
 }
 
 
