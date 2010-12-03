@@ -47,10 +47,10 @@
 #------------------------------------------------------------------------------#
 #                    V e r s i o n   i n f o r m a t i o n                     #
 #------------------------------------------------------------------------------#
-# $Id:: mysqlbackup 49 2010-12-02 14:18:03 tonk                             $: #
-# $Revision:: 49                                                            $: #
+# $Id:: mysqlbackup 50 2010-12-03 10:04:59 tonk                             $: #
+# $Revision:: 50                                                            $: #
 # $Author:: Ton Kersten <tonk@tonkersten.com>                               $: #
-# $Date:: 2010-12-02 14:18:32 +0100 (Thu, 02 Dec 2010)                      $: #
+# $Date:: 2010-12-03 10:06:33 +0100 (Fri, 03 Dec 2010)                      $: #
 # $Hash::                                                                   $: #
 #------------------------------------------------------------------------------#
 #             E n d   o f   v e r s i o n   i n f o r m a t i o n              #
@@ -104,19 +104,97 @@ SIN="$(printf "%${WD}s" "")"; SIN="${SIN// /-}"		# Single dash line         #
 DBL="$(printf "%${WD}s" "")"; DBL="${DBL// /=}"		# Double dash line         #
 
 #------------------------------------------------------------------------------#
-# Check the parameters                                                         #
+# Function to process the defaults                                             #
 #------------------------------------------------------------------------------#
-[[ "${1:-}" = "-V" ]] &&
-{	echo "This is '${IAM}' version ${VER}" >&2
-	exit 0
+default()
+{
+	ACT="${1}"		; shift
+	DESC="${1}"		; shift
+	VAR="${1}"		; shift
+	VAL="\"${*}\""
+
+	case ${ACT}
+	in
+		set)
+			eval "${VAR}"="${VAL}"
+			;;
+
+		show)
+			echo "${VAR} = ${VAL}"
+			;;
+
+		desc)
+			eval PR="\${${VAR:-${VAL}}}"
+			PR="\"${PR}\""
+			printf "%-30s -> %-20s = %s\n" "${DESC}" "${VAR}" "${PR}"
+			;;
+
+		conf)
+			printf "# %s\n%s=%s\n\n" "${DESC}" "${VAR}" "${VAL}"
+			;;
+
+		*)
+			echo "Unknown defaults action: ${ACT}"
+			exit 1
+			;;
+	esac
 }
 
+#------------------------------------------------------------------------------#
+# all defaults                                                                 #
+#------------------------------------------------------------------------------#
+defaults()
+{
+	WHAT="${1}"
+
+	default ${WHAT} "Database username             " USERNAME          "root"
+	default ${WHAT} "Database password             " PASSWORD          "password"
+	default ${WHAT} "Database host                 " DBHOST            "localhost"
+	default ${WHAT} "Backup owner                  " OWNER             "root"
+	default ${WHAT} "Backup group                  " GROUP             "root"
+	default ${WHAT} "Backup databases              " DBNAMES           "all"
+	default ${WHAT} "Backup location               " BACKUPDIR         "/backup/mysql"
+	default ${WHAT} "Mail logging                  " MAILCONTENT       "stdout"
+	default ${WHAT} "Maximum attachment size       " MAXATTSIZE        "4000"
+	default ${WHAT} "E-mail address for logging    " MAILADDR          "root@localhost"
+	default ${WHAT} "Make monthly backups          " DOMONTHLY         "yes"
+	default ${WHAT} "Monthly backup databases      " MONTHLY_DBNAMES   "all"
+	default ${WHAT} "Exclude databases             " DBEXCLUDE         "none"
+	default ${WHAT} "Include 'CREATE DATABASE'     " CREATE_DATABASE   "yes"
+	default ${WHAT} "Include 'DROP DATABASE'       " DROP_DATABASE     "yes"
+	default ${WHAT} "Include 'DROP TABLE'          " DROP_TABLE        "yes"
+	default ${WHAT} "Use seperate directories      " SEPDIR            "yes"
+	default ${WHAT} "Weekly backups on day (1=Mon) " DOWEEKLY          "6"
+	default ${WHAT} "Use compression (gzip/bzip2)  " COMP              "gzip"
+	default ${WHAT} "Compress MySQL communication  " COMMCOMP          "no"
+	default ${WHAT} "Keep 'latest' backup copy     " LATEST            "yes"
+	default ${WHAT} "Lock tables during backup     " LOCK_TABLES       "yes"
+	default ${WHAT} "Run database checks           " RUN_CHECK         "yes"
+	default ${WHAT} "Run database optimize checks  " CHECK_OPTIMIZE    "yes"
+	default ${WHAT} "Run database upgrade checks   " CHECK_UPGRADE     "yes"
+	default ${WHAT} "Run database repair           " CHECK_REPAIR      "no"
+	default ${WHAT} "Maximum buffer size           " MAX_ALLOWED_PACKET ""
+	default ${WHAT} "UNIX socket path              " SOCKET             ""
+	default ${WHAT} "Pre backup script             " PREBACKUP          ""
+	default ${WHAT} "Post backup script            " POSTBACKUP         ""
+
+	return
+}
+defaults set
+
+#------------------------------------------------------------------------------#
+# Check the parameters                                                         #
+#------------------------------------------------------------------------------#
 [[ "${1:-}" = "-h" ]] &&
 {	cat <<- @EOF >&2
 		${IAM} version ${VER}
-		Syntax: ${IAM} [ -h|-v|<configfile>]
+		Syntax: ${IAM} [ -h|-v|-s|-c|-d|<configfile>]
 		    -h           Display this help and exit
-		    -V           Display the version number and exit
+		    -v           Display the version number and exit
+		    -s           Show the defaults and their values
+		    -d           Show a description of the defaults and their values
+		    -c           Show a default configuration file
+		    -a           Show settings after the config file is processed
 		    configfile   Use this file as the configuration file
 		                 instead of the default.
 		                 Default: ${CONFIGFILE}
@@ -124,9 +202,16 @@ DBL="$(printf "%${WD}s" "")"; DBL="${DBL// /=}"		# Double dash line         #
 	exit 0
 }
 
+[[ "${1:-}" = "-v" ]] && { echo "This is '${IAM}' version ${VER}" >&2 ; exit 0 ; }
+[[ "${1:-}" = "-s" ]] && { defaults show ; exit 0 ; }
+[[ "${1:-}" = "-c" ]] && { defaults conf ; exit 0 ; }
+[[ "${1:-}" = "-d" ]] && { defaults desc ; exit 0 ; }
+
 #------------------------------------------------------------------------------#
 # Read the configuration                                                       #
 #------------------------------------------------------------------------------#
+showvars="n"
+[[ "${1:-}" = "-a" ]] && {	showvars="y" ; shift ; }
 CONFIGFILE="${1:-${CRD}/${IAM}.conf}"
 if [[ -r "${CONFIGFILE}" ]]
 then
@@ -138,6 +223,12 @@ else
 	echo "Could not find config '${CONFIGFILE}'!" >&2
 	exit 1
 fi
+[[ "${showvars}" = "y" ]] &&
+{	echo "Processed config file ${CONFIGFILE}"
+	echo "${DBL}"
+	defaults desc
+	exit 0
+}
 
 #------------------------------------------------------------------------------#
 # We need the BACKUPDIR setting                                                #
@@ -159,15 +250,8 @@ OPT="${OPT} --quote-names"
 # Extra options: --no-create-info                                              #
 
 #------------------------------------------------------------------------------#
-# Who owns the backup                                                          #
-#------------------------------------------------------------------------------#
-OWNER="${OWNER:-root}"
-GROUP="${GROUP:-root}"
-
-#------------------------------------------------------------------------------#
 # Add compression if this is requested                                         #
 #------------------------------------------------------------------------------#
-COMMCOMP="${COMMCOMP:-no}"
 if [[ "${COMMCOMP}" = "yes" ]]
 then
 	OPT="${OPT} --compress"
@@ -176,7 +260,6 @@ fi
 #------------------------------------------------------------------------------#
 # Add a maximum speed if this is requested                                     #
 #------------------------------------------------------------------------------#
-MAX_ALLOWED_PACKET="${MAX_ALLOWED_PACKET:-}"
 if [[ x"${MAX_ALLOWED_PACKET}" != x"" ]]
 then
 	OPT="${OPT} --max_allowed_packet=${MAX_ALLOWED_PACKET}"
@@ -185,7 +268,6 @@ fi
 #------------------------------------------------------------------------------#
 # Add drop database option if this is requested                                #
 #------------------------------------------------------------------------------#
-DROP_DATABASE="${DROP_DATABASE:-no}"
 if [[ "${DROP_DATABASE}" = "yes" ]]
 then
 	OPT="${OPT} --add-drop-database"
@@ -194,16 +276,10 @@ fi
 #------------------------------------------------------------------------------#
 # Add drop table option if this is requested                                   #
 #------------------------------------------------------------------------------#
-DROP_TABLE="${DROP_TABLE:-no}"
 if [[ "${DROP_TABLE}" = "yes" ]]
 then
 	OPT="${OPT} --add-drop-table"
 fi
-
-#------------------------------------------------------------------------------#
-# Make monthly backups (default = yes)                                         #
-#------------------------------------------------------------------------------#
-DOMONTHLY="${DOMONTHLY:-yes}"
 
 #------------------------------------------------------------------------------#
 # Create required directories                                                  #
@@ -216,7 +292,6 @@ DOMONTHLY="${DOMONTHLY:-yes}"
 #------------------------------------------------------------------------------#
 # Latest backups requested (Default = yes)                                     #
 #------------------------------------------------------------------------------#
-LATEST="${LATEST:-yes}"
 if [[ "${LATEST}" = "yes" ]]
 then
 	[[ ! -e ${BACKUPDIR}/latest ]] && mkdir -p ${BACKUPDIR}/latest
@@ -271,9 +346,9 @@ dbcheck ()
 {
 
 	CHKOPT=""
-	[[ "${CHECK_REPAIR:-no}"   = "yes" ]] && CHKOPT="${CHKOPT} --auto-repair"
-	[[ "${CHECK_OPTIMIZE:-no}" = "yes" ]] && CHKOPT="${CHKOPT} --optimize"
-	[[ "${CHECK_UPGRADE:-no}"  = "yes" ]] && CHKOPT="${CHKOPT} --check-upgrade"
+	[[ "${CHECK_REPAIR}"   = "yes" ]] && CHKOPT="${CHKOPT} --auto-repair"
+	[[ "${CHECK_OPTIMIZE}" = "yes" ]] && CHKOPT="${CHKOPT} --optimize"
+	[[ "${CHECK_UPGRADE}"  = "yes" ]] && CHKOPT="${CHKOPT} --check-upgrade"
 
 	mysqlcheck							\
 		--user=${USERNAME}				\
@@ -322,7 +397,7 @@ compression ()
 	cd ${ZIPDIRE}
 
 	RC=0
-	case ${COMP:-}
+	case ${COMP}
 	in
 		gzip)
 			echo "Compression information for ${ZIPFILE}.zip"
@@ -365,7 +440,7 @@ compression ()
 #------------------------------------------------------------------------------#
 # Run a command before we begin                                                #
 #------------------------------------------------------------------------------#
-if [[ x"${PREBACKUP:-}" != x"" ]]
+if [[ x"${PREBACKUP}" != x"" ]]
 then
 	echo "${DBL}"
 	echo "Prebackup command output."
@@ -379,8 +454,8 @@ fi
 #------------------------------------------------------------------------------#
 # Create a OPT string for the given options                                    #
 #------------------------------------------------------------------------------#
-SEPDIR="${SEPDIR:-yes}"
-CREATE_DATABASE="${CREATE_DATABASE:-yes}"
+SEPDIR="${SEPDIR}"
+CREATE_DATABASE="${CREATE_DATABASE}"
 if [[ "${SEPDIR}" = "yes" ]]
 then
 	#--------------------------------------------------------------------------#
@@ -395,13 +470,11 @@ then
 else
 	OPT="${OPT} --databases"
 fi
-[[ "${LOCK_TABLES:-yes}" = "no" ]] && OPT="${OPT} --skip-lock-tables"
+[[ "${LOCK_TABLES}" = "no" ]] && OPT="${OPT} --skip-lock-tables"
 
 #------------------------------------------------------------------------------#
 # Hostname for LOG information                                                 #
 #------------------------------------------------------------------------------#
-DBHOST="${DBHOST:-localhost}"
-SOCKET="${SOCKET:-}"
 if [[ "${DBHOST}" = "localhost" ]]
 then
 	HOST=$(hostname)
@@ -417,7 +490,6 @@ HD="${HOST} - $(now)"
 #------------------------------------------------------------------------------#
 # Backup all databases?                                                        #
 #------------------------------------------------------------------------------#
-DBNAMES="${DBNAMES:-all}"
 if [[ "${DBNAMES}" = "all" ]]
 then
 	#--------------------------------------------------------------------------#
@@ -440,21 +512,14 @@ then
 	#--------------------------------------------------------------------------#
 	# Strip the DBs that are excluded                                          #
 	#--------------------------------------------------------------------------#
-	for exclude in ${DBEXCLUDE:-}
+	for exclude in ${DBEXCLUDE}
 	do
 		DBNAMES=$(echo ${DBNAMES} | sed "s/\b${exclude}\b//g")
 	done
 
 	MONTHLY_DBNAMES=${DBNAMES}
 fi
-MONTHLY_DBNAMES=${MONTHLY_DBNAMES:-}
-
-#------------------------------------------------------------------------------#
-# Set the defaults for the MySQL check                                         #
-#------------------------------------------------------------------------------#
-RUN_CHECK="${RUN_CHECK:-yes}"
-CHECK_OPTIMIZE="${CHECK_OPTIMIZE:-yes}"
-CHECK_REPAIR="${CHECK_REPAIR:-no}"
+MONTHLY_DBNAMES=${MONTHLY_DBNAMES}
 
 #------------------------------------------------------------------------------#
 # Here we go!                                                                  #
@@ -480,7 +545,7 @@ echo "Backup settings"
 echo "    Start time and date           : $(now)"
 echo "    Backup directory              : ${BACKUPDIR}"
 echo "    Use seperate directories      : ${SEPDIR}"
-echo "    Exclude databases             : ${DBEXCLUDE:-none}"
+echo "    Exclude databases             : ${DBEXCLUDE}"
 echo "    Weekly backup on day          : ${DOWEEKLYDAY}"
 echo "    Backup owner and group        : ${OWNER} - ${GROUP}"
 echo "    Compression                   : ${COMP}"
@@ -700,7 +765,7 @@ echo "Size - Location $(du -hs "${BACKUPDIR}")"
 #------------------------------------------------------------------------------#
 # Run command when we're done                                                  #
 #------------------------------------------------------------------------------#
-if [[ x"${POSTBACKUP:-}" != x"" ]]
+if [[ x"${POSTBACKUP}" != x"" ]]
 then
 	echo "${DBL}"
 	echo "Postbackup command output."
@@ -745,7 +810,7 @@ exec 1>&7 7>&-
 #------------------------------------------------------------------------------#
 # Mail the results if requested                                                #
 #------------------------------------------------------------------------------#
-case "${MAILCONTENT:-}"
+case "${MAILCONTENT}"
 in
 	files)
 		if [[ -s "${LOGERR}" ]]
