@@ -99,7 +99,7 @@ DOM=$(  date '+%d')					# Date of the Month e.g. 27                #
 M=$(    date '+%B')					# Name of the Month e.g January            #
 W=$(    date '+%V')					# Week Number e.g 37                       #
 WN="$(echo "${W}" | sed 's/^0//')"	# Week Nymber without leading 0            #
-WD="80"								# Screen width                             #
+WD="74"								# Screen width                             #
 SIN="$(printf "%${WD}s" "")"; SIN="${SIN// /-}"		# Single dash line         #
 DBL="$(printf "%${WD}s" "")"; DBL="${DBL// /=}"		# Double dash line         #
 
@@ -130,7 +130,7 @@ default()
 			;;
 
 		conf)
-			printf "# %s\n%s=%s\n\n" "${DESC}" "${VAR}" "${VAL}"
+			printf "#%s-#\n# %-${WD}s#\n#%s-#\n%s=%s\n\n" "${SIN}" "${DESC}" "${SIN}" "${VAR}" "${VAL}"
 			;;
 
 		*)
@@ -147,36 +147,37 @@ defaults()
 {
 	WHAT="${1}"
 
-	default ${WHAT} "Database username             " USERNAME          "root"
-	default ${WHAT} "Database password             " PASSWORD          "password"
-	default ${WHAT} "Database host                 " DBHOST            "localhost"
-	default ${WHAT} "Backup owner                  " OWNER             "root"
-	default ${WHAT} "Backup group                  " GROUP             "root"
-	default ${WHAT} "Backup databases              " DBNAMES           "all"
-	default ${WHAT} "Backup location               " BACKUPDIR         "/backup/mysql"
-	default ${WHAT} "Mail logging                  " MAILCONTENT       "stdout"
-	default ${WHAT} "Maximum attachment size       " MAXATTSIZE        "4000"
-	default ${WHAT} "E-mail address for logging    " MAILADDR          "root@localhost"
-	default ${WHAT} "Make monthly backups          " DOMONTHLY         "yes"
-	default ${WHAT} "Monthly backup databases      " MONTHLY_DBNAMES   "all"
-	default ${WHAT} "Exclude databases             " DBEXCLUDE         "none"
-	default ${WHAT} "Include 'CREATE DATABASE'     " CREATE_DATABASE   "yes"
-	default ${WHAT} "Include 'DROP DATABASE'       " DROP_DATABASE     "yes"
-	default ${WHAT} "Include 'DROP TABLE'          " DROP_TABLE        "yes"
-	default ${WHAT} "Use seperate directories      " SEPDIR            "yes"
-	default ${WHAT} "Weekly backups on day (1=Mon) " DOWEEKLY          "6"
-	default ${WHAT} "Use compression (gzip/bzip2)  " COMP              "gzip"
-	default ${WHAT} "Compress MySQL communication  " COMMCOMP          "no"
-	default ${WHAT} "Keep 'latest' backup copy     " LATEST            "yes"
-	default ${WHAT} "Lock tables during backup     " LOCK_TABLES       "yes"
-	default ${WHAT} "Run database checks           " RUN_CHECK         "yes"
-	default ${WHAT} "Run database optimize checks  " CHECK_OPTIMIZE    "yes"
-	default ${WHAT} "Run database upgrade checks   " CHECK_UPGRADE     "yes"
-	default ${WHAT} "Run database repair           " CHECK_REPAIR      "no"
-	default ${WHAT} "Maximum buffer size           " MAX_ALLOWED_PACKET ""
-	default ${WHAT} "UNIX socket path              " SOCKET             ""
-	default ${WHAT} "Pre backup script             " PREBACKUP          ""
-	default ${WHAT} "Post backup script            " POSTBACKUP         ""
+	default ${WHAT} "Database username                " USERNAME           "root"
+	default ${WHAT} "Database password                " PASSWORD           "password"
+	default ${WHAT} "Database host                    " DBHOST             "localhost"
+	default ${WHAT} "Backup owner                     " OWNER              "root"
+	default ${WHAT} "Backup group                     " GROUP              "root"
+	default ${WHAT} "Backup databases                 " DBNAMES            "all"
+	default ${WHAT} "Backup location                  " BACKUPDIR          "/backup/mysql"
+	default ${WHAT} "Mail logging                     " MAILCONTENT        "stdout"
+	default ${WHAT} "Maximum attachment size          " MAXATTSIZE         "4000"
+	default ${WHAT} "Email address for logging        " MAILADDR           "root@localhost"
+	default ${WHAT} "Make monthly backups             " DOMONTHLY          "yes"
+	default ${WHAT} "Monthly backup databases         " MONTHLY_DBNAMES    "all"
+	default ${WHAT} "Exclude databases                " DBEXCLUDE          ""
+	default ${WHAT} "Exclude database tables          " TBEXCLUDE          ""
+	default ${WHAT} "Include 'CREATE DATABASE'        " CREATE_DATABASE    "yes"
+	default ${WHAT} "Include 'DROP DATABASE'          " DROP_DATABASE      "yes"
+	default ${WHAT} "Include 'DROP TABLE'             " DROP_TABLE         "yes"
+	default ${WHAT} "Use seperate directories         " SEPDIR             "yes"
+	default ${WHAT} "Weekly backups on day (1=Monday) " DOWEEKLY           "6"
+	default ${WHAT} "Use compression (gzip/bzip2)     " COMP               "gzip"
+	default ${WHAT} "Compress MySQL communication     " COMMCOMP           "no"
+	default ${WHAT} "Keep 'latest' backup copy        " LATEST             "yes"
+	default ${WHAT} "Lock tables during backup        " LOCK_TABLES        "yes"
+	default ${WHAT} "Run database checks              " RUN_CHECK          "yes"
+	default ${WHAT} "Run database optimize checks     " CHECK_OPTIMIZE     "yes"
+	default ${WHAT} "Run database upgrade checks      " CHECK_UPGRADE      "yes"
+	default ${WHAT} "Run database repair              " CHECK_REPAIR       "no"
+	default ${WHAT} "Maximum packet size              " MAX_ALLOWED_PACKET "16MB"
+	default ${WHAT} "UNIX socket path                 " SOCKET             ""
+	default ${WHAT} "Pre backup script                " PREBACKUP          ""
+	default ${WHAT} "Post backup script               " POSTBACKUP         ""
 
 	return
 }
@@ -522,6 +523,17 @@ fi
 MONTHLY_DBNAMES=${MONTHLY_DBNAMES}
 
 #------------------------------------------------------------------------------#
+# Backup all database tables?                                                  #
+#------------------------------------------------------------------------------#
+if [[ x"${TBEXCLUDE}" != x"" ]]
+then
+	for table in ${TBEXCLUDE}
+	do
+		OPT="${OPT} --ignore-table=${table}"
+	done
+fi
+
+#------------------------------------------------------------------------------#
 # Here we go!                                                                  #
 #------------------------------------------------------------------------------#
 case ${DOWEEKLY}
@@ -546,6 +558,7 @@ echo "    Start time and date           : $(now)"
 echo "    Backup directory              : ${BACKUPDIR}"
 echo "    Use seperate directories      : ${SEPDIR}"
 echo "    Exclude databases             : ${DBEXCLUDE}"
+echo "    Exclude database tables       : ${TBEXCLUDE}"
 echo "    Weekly backup on day          : ${DOWEEKLYDAY}"
 echo "    Backup owner and group        : ${OWNER} - ${GROUP}"
 echo "    Compression                   : ${COMP}"
