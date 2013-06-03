@@ -47,10 +47,10 @@
 #------------------------------------------------------------------------------#
 #                    V e r s i o n   i n f o r m a t i o n                     #
 #------------------------------------------------------------------------------#
-# $Id:: mysqlbackup 50 2010-12-03 10:04:59 tonk                             $: #
-# $Revision:: 50                                                            $: #
-# $Author:: Ton Kersten <tonk@tonkersten.com>                               $: #
-# $Date:: 2010-12-03 10:06:33 +0100 (Fri, 03 Dec 2010)                      $: #
+# $Id:: mysqlbackup 51 2013-06-03 09:00:14 tonk                             $: #
+# $Revision:: 51                                                            $: #
+# $Author:: Ton Kersten <github@tonkersten.com>                             $: #
+# $Date:: 2013-06-03 09:03:12 +0200 (Mon, 03 Jun 2013)                      $: #
 # $Hash::                                                                   $: #
 #------------------------------------------------------------------------------#
 #             E n d   o f   v e r s i o n   i n f o r m a t i o n              #
@@ -80,7 +80,7 @@ SETX=0; [[ ${-} = *x* ]] && SETX=1
 # Set and unset the needed shell settings                                      #
 #------------------------------------------------------------------------------#
 set +o noclobber			# Overwrite existing files, if needed              #
-set -o nounset				# Don't allow uninitialized variables              #
+set -o nounset				# Do not allow uninitialized variables             #
 set +o errexit				# No returncode checking                           #
 
 #------------------------------------------------------------------------------#
@@ -170,6 +170,7 @@ defaults()
 	default ${WHAT} "Compress MySQL communication     " COMMCOMP           "no"
 	default ${WHAT} "Keep 'latest' backup copy        " LATEST             "yes"
 	default ${WHAT} "Lock tables during backup        " LOCK_TABLES        "yes"
+	default ${WHAT} "Include 'Event' database         " INC_EVENTS         "yes"
 	default ${WHAT} "Run database checks              " RUN_CHECK          "yes"
 	default ${WHAT} "Run database optimize checks     " CHECK_OPTIMIZE     "yes"
 	default ${WHAT} "Run database upgrade checks      " CHECK_UPGRADE      "yes"
@@ -460,7 +461,7 @@ CREATE_DATABASE="${CREATE_DATABASE}"
 if [[ "${SEPDIR}" = "yes" ]]
 then
 	#--------------------------------------------------------------------------#
-	# Check if CREATE DATABSE should be included in the dump                   #
+	# Check if CREATE DATABASE should be included in the dump                  #
 	#--------------------------------------------------------------------------#
 	if [[ "${CREATE_DATABASE}" = "no" ]]
 	then
@@ -471,7 +472,8 @@ then
 else
 	OPT="${OPT} --databases"
 fi
-[[ "${LOCK_TABLES}" = "no" ]] && OPT="${OPT} --skip-lock-tables"
+[[ "${LOCK_TABLES}" = "no"  ]] && OPT="${OPT} --skip-lock-tables"
+[[ "${INC_EVENTS}"  = "yes" ]] && OPT="${OPT} --events"
 
 #------------------------------------------------------------------------------#
 # Hostname for LOG information                                                 #
@@ -565,6 +567,7 @@ echo "    Compression                   : ${COMP}"
 echo "    Communication compression     : ${COMMCOMP}"
 echo "    Create latest backup          : ${LATEST}"
 echo "    Lock database during backup   : ${LOCK_TABLES}"
+echo "    Include 'Event' database      : ${INC_EVENTS}"
 echo "    Add 'create database' command : ${CREATE_DATABASE}"
 echo "    Add 'drop database' command   : ${DROP_DATABASE}"
 echo "    Add 'drop table' command      : ${DROP_TABLE}"
